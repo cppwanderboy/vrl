@@ -83,12 +83,25 @@ impl Opts {
             None => read(io::stdin()),
         }?;
 
-        match input.as_str() {
-            "" => Ok(vec![Value::Object(BTreeMap::default())]),
-            _ => input
-                .lines()
-                .map(|line| Ok(serde_to_vrl(serde_json::from_str(line)?)))
-                .collect::<Result<Vec<Value>, Error>>(),
+        // if input_file path end with json, parse as json
+        let fname = self.input_file.as_ref().unwrap();
+        let path = fname.as_path();
+        if path.extension().map(|s| s.to_ascii_lowercase()) == Some("json".into()) {
+            match input.as_str() {
+                "" => Ok(vec![Value::Object(BTreeMap::default())]),
+                _ => input
+                    .lines()
+                    .map(|line| Ok(serde_to_vrl(serde_json::from_str(line)?)))
+                    .collect::<Result<Vec<Value>, Error>>(),
+            }
+        } else {
+            match input.as_str() {
+                "" => Ok(vec![Value::Object(BTreeMap::default())]),
+                _ => input
+                    .lines()
+                    .map(|line| Ok(serde_to_vrl(serde_json::json!({ "message": line }))))
+                    .collect::<Result<Vec<Value>, Error>>(),
+            }
         }
     }
 
