@@ -6,7 +6,7 @@ use std::{
     iter::IntoIterator,
     path::PathBuf,
 };
-
+use chrono::SecondsFormat;
 use crate::compiler::runtime::Runtime;
 use crate::compiler::state::RuntimeState;
 use crate::compiler::TimeZone;
@@ -43,6 +43,12 @@ pub struct Opts {
     /// this flag is equivalent to using `.` as the final expression.
     #[arg(short = 'o', long)]
     print_object: bool,
+
+    #[arg(short = 'c', long = "print-csv")]
+    print_csv: bool,
+
+    #[arg(long = "sep", default_value = ",")]
+    sep: String,
 
     /// The timezone used to parse dates.
     #[arg(short = 'z', long)]
@@ -124,6 +130,49 @@ pub fn cmd(opts: &Opts, stdlib_functions: Vec<Box<dyn Function>>) -> exitcode::E
     }
 }
 
+fn to_csv(value: Value, sep: &str) -> String {
+    let mut csv = String::new();
+    static mut FIRST_CSV: bool = true;
+    let mut keys = Vec::new();
+    let mut values = Vec::new();
+    match value {
+        Value::Object(map) => {
+            for (key, value) in map {
+                keys.push(key);
+                values.push(value);
+            }
+        }
+        _ => {
+            return value.to_string();
+        }
+    }
+    unsafe {
+        if FIRST_CSV {
+            for key in keys {
+                csv.push_str(&key);
+                csv.push_str(sep);
+            }
+            csv.pop();
+            csv.push_str("\n");
+            FIRST_CSV = false;
+        }
+    }
+    for value in values {
+        match value {
+            Value::Timestamp(value) => {
+                csv.push_str(&value.to_rfc3339_opts(SecondsFormat::Micros, true));
+                csv.push_str(sep);
+            }
+            _ => {
+                csv.push_str(&value.as_str().expect("value is not a string"));
+                csv.push_str(sep);
+            }
+        }
+    }
+    csv.pop();
+    csv
+}
+
 fn run(opts: &Opts, stdlib_functions: Vec<Box<dyn Function>>) -> Result<(), Error> {
     let tz = opts.timezone()?;
     // Run the REPL if no program or program file is specified
@@ -157,9 +206,9 @@ fn run(opts: &Opts, stdlib_functions: Vec<Box<dyn Function>>) -> Result<(), Erro
             &state,
             CompileConfig::default(),
         )
-        .map_err(|diagnostics| {
-            Error::Parse(Formatter::new(&source, diagnostics).colored().to_string())
-        })?;
+            .map_err(|diagnostics| {
+                Error::Parse(Formatter::new(&source, diagnostics).colored().to_string())
+            })?;
 
         #[allow(clippy::print_stderr)]
         if opts.print_warnings {
@@ -179,7 +228,9 @@ fn run(opts: &Opts, stdlib_functions: Vec<Box<dyn Function>>) -> Result<(), Erro
             let runtime = Runtime::new(state);
 
             let result = execute(&mut target, &program, tz, runtime, opts.runtime).map(|v| {
-                if opts.print_object {
+                if opts.print_csv {
+                    to_csv(object, opts.sep.as_str())
+                } else if opts.print_object {
                     object.to_string()
                 } else {
                     v.to_string()
